@@ -4,6 +4,10 @@ Use [the REA porting guide](docs/PORTING_WITH_REA.md) when a LightBurn update ch
 
 Keep each supported build bound to its exact executable hash. Check the native function signatures, object layouts, and Qt bindings before enabling a new build. Preserve the existing tool behavior and the previous build's support unless the user requests otherwise.
 
+## Licensing boundaries
+
+Cracking attempts are prohibited. Keep reverse engineering scoped to extension compatibility. Do not attempt to bypass, disable, or tamper with LightBurn's licensing, activation, trial limits, or paid feature restrictions. This prohibition also applies to proofs of concept and testing.
+
 The user performs all interactive LightBurn checks. Agents may inspect files, compile the extension, and run standalone tests. Leave launching LightBurn, loading the DLL into LightBurn, and trying the tools in its editor to the user.
 
 Keep LightBurn binaries, PDBs, raw disassembly, REA evidence bundles, and local runtime files outside Git and the portable ZIP. Record compatibility findings and their verification status in the repository as described in the guide.
