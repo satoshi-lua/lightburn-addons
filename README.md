@@ -9,6 +9,20 @@ An unofficial extension that pre-compensates vector designs for engraving on tap
 
 Both tools preserve the design height, save their settings separately, and let you compare the compensated preview with the original. **Apply** creates an undo step in LightBurn. Text is converted to paths, and groups may be converted to individual paths. Select vector artwork to use either tool.
 
+## Screenshots
+
+**Dual Taper Warp** shows the compensated design next to the vessel profile, with the upper straight section, transition, and lower straight section marked.
+
+![Dual Taper Warp dialog with a compensated vector and a dimensioned three-zone vessel profile](docs/screenshots/dual-taper-warp.png)
+
+**Taper Warp v2** shows the compensated design inside the virtual reference rectangle.
+
+![Taper Warp v2 dialog with the design position slider, reference rectangle, and tapered vessel profile](docs/screenshots/taper-warp-v2-dialog.png)
+
+Both tools appear under **Taper Warp** in the **Laser Tools** menu.
+
+![LightBurn Laser Tools menu showing Taper Warp v2 and Dual Taper Warp below Taper Warp](docs/screenshots/laser-tools-menu.png)
+
 ## Compatibility
 
 The Windows x64 launcher verifies the full executable SHA-256 and checks the mapped image before loading the extension.
