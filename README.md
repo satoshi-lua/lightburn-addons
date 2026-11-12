@@ -11,7 +11,14 @@ Both tools preserve the design height, save their settings separately, and let y
 
 ## Compatibility
 
-The extension supports **LightBurn 2.1.04 on Windows x64** with executable SHA-256 `68a80dabab4b05c3773a231d3aaaa0adf64df61b4bee2aeced6fa369b0ef149b`. The adapter uses internal functions from this specific build. The launcher verifies the executable hash before loading the extension into your existing LightBurn installation. See the [installation guide](INSTALL.md) for the portable ZIP.
+The Windows x64 launcher verifies the full executable SHA-256 and checks the mapped image before loading the extension.
+
+| LightBurn | Executable SHA-256 | Verification |
+| --- | --- | --- |
+| 2.1.04 | `68a80dabab4b05c3773a231d3aaaa0adf64df61b4bee2aeced6fa369b0ef149b` | Existing adapter carried forward |
+| 2.2.01 | `1c7c1d2d0843535bcd3188b569ca2b1ace5c1281eb0324de9aa881ebb65b4b3b` | Static checks and standalone tests passed. Manual editor checks pending. |
+
+See the [installation guide](INSTALL.md) for the portable ZIP and manual test steps.
 
 ## Build and package
 
@@ -21,13 +28,13 @@ Install Visual Studio 2022 or Build Tools with the x64 C++ tools and Windows SDK
 build.cmd
 ```
 
-The script builds the launcher and DLL in `build/` and runs the compensation and preview tests without starting LightBurn. Building requires neither the Qt SDK nor any LightBurn files. To create the portable ZIP and its SHA-256 checksum, run this from the same prompt.
+The script builds the launcher and DLL in `build/` and runs the compensation, preview and build-profile tests without starting LightBurn. Building requires neither the Qt SDK nor any LightBurn files. To create the portable ZIP and its SHA-256 checksum, run this from the same prompt.
 
 ```bat
 package.cmd
 ```
 
-The package is written to `dist/`. Manual testing on a second installation is still pending.
+The package is written to `dist/`.
 
 See the [REA porting guide](docs/PORTING_WITH_REA.md) for updating the adapter when LightBurn releases a new build.
 

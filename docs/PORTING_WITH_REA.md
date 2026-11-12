@@ -1,11 +1,11 @@
 # Porting Taper Warp Tools with REA
 
-Use this workflow to assess or add support for a new LightBurn build. The launcher and native adapter currently support one exact Windows x64 build. See the [LightBurn 2.2.01 investigation](lightburn-2.2.01.md) for an example of candidate addresses recovered from a real update.
+Use this workflow to assess or add support for a new LightBurn build. The launcher and native adapter share [exact Windows x64 profiles](../src/lightburn_profile.h). See the [LightBurn 2.2.01 investigation](lightburn-2.2.01.md) for an example of static verification.
 
 ## 1. Identify the target and baseline
 
 1. Identify the `LightBurn.exe` selected by the user. Record its installed product version, PE architecture, SHA-256, and the versions of `Qt6Core.dll`, `Qt6Gui.dll`, and `Qt6Widgets.dll` from the same installation. The executable's version resource can be blank. Use the installer registration or other local package metadata in that case.
-2. Use the last supported binary as the baseline. Verify its SHA-256 against [the launcher](../src/launcher.cpp). A local backup is suitable. For each build with a PDB, match the executable's PE CodeView RSDS GUID and age against the PDB before trusting symbol addresses.
+2. Use the last supported binary as the baseline. Verify its SHA-256 against [the profiles](../src/lightburn_profile.h). A local backup is suitable. For each build with a PDB, match the executable's PE CodeView RSDS GUID and age against the PDB before trusting symbol addresses.
 3. Keep the analysis and any backup outside the repository. If a backup of the target is missing, copy the executable to a local folder named for its hash and verify the copy before any manual integration test. Work from copies when using a provider that produces analysis files. Record paths privately and leave the installed files intact.
 
 ```powershell
@@ -42,7 +42,7 @@ Use [native_bridge.cpp](../src/native_bridge.cpp), [native_dialog.h](../src/nati
 
 ## 3. Add and package a build profile
 
-When implementation is in scope, add a profile for the exact target SHA-256. The current source contains inline constants for the original build. Move the version-dependent values into named profiles as needed, keeping shared dialog and geometry logic common. Keep the known profile intact and make the launcher and bridge agree on the selected build and binary guard. Reject unknown executables before loading the DLL, and abort bridge initialization before using internal addresses if the selected profile's guard fails.
+When implementation is in scope, add a profile for the exact target SHA-256. Put version-dependent values in the profile and keep shared dialog and geometry logic common. Preserve the existing profiles. The launcher rejects unknown executables and checks the mapped image before loading the DLL. The bridge selects the same profile by SHA-256 and checks the mapped image again before using internal addresses.
 
 Keep the launcher, DLL filename, readiness protocol, package contents, and compatibility docs in sync. Give a changed DLL a distinct filename so a previous copy can remain loaded until the user exits LightBurn. The backup folder must correspond to the verified executable. Keep compatibility notes for each added build in `docs/`, with the executable hash, evidence, and separate static and manual verification status.
 

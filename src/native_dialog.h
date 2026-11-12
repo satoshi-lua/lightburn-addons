@@ -3,7 +3,7 @@
 #include <array>
 #include "preview_svg.h"
 
-// Qt objects are constructed/destructed by the host's Qt 6.5.7 exports.
+// Qt objects are constructed/destructed by the host's Qt exports.
 // Never share Qt C++ objects with a different Qt runtime or C++ ABI.
 struct NativeString: String {
  explicit NativeString(const std::string& s){stringInit(*this,s.c_str());}
@@ -80,9 +80,9 @@ struct NativeDialog {
    String title;qt<void*(*)(void*,void*)>(L"Qt6Widgets.dll","?title@QMenu@@QEBA?AVQString@@XZ")(taperMenu,&title);
    auto name=utf8(title);stringFree(title);name.erase(std::remove(name.begin(),name.end(),'&'),name.end());english=name.find("Laser Tools")!=std::string::npos;
   }
-  float scale=*reinterpret_cast<float*>(base+0x194935c);
+  float scale=*reinterpret_cast<float*>(base+profile->unitScale);
   if(std::isfinite(scale)&&scale>0&&scale<1000)unitScale=scale;
-  auto text=utf8(*reinterpret_cast<String*>(base+0x1949368));
+  auto text=utf8(*reinterpret_cast<String*>(base+profile->unitSuffix));
   if(!text.empty()) {unit=text;while(!unit.empty()&&unit.front()==' ')unit.erase(unit.begin());}
   else if(std::abs(unitScale-1)>.0001)unit="in";
   try {build();}catch(...) {if(dialog){deleteQtObject(dialog);dialog=nullptr;}throw;}
@@ -205,7 +205,7 @@ struct NativeDialog {
  void applyChanges() {
   try {auto p=parameters();validate(p,source);commit(source,p);qt<void(*)(void*)>(L"Qt6Widgets.dll","?accept@QDialog@@UEAAXXZ")(dialog);}
   catch(const std::exception& e) {
-   if(undoGroup){fn<void(*)(void*)>(0xae370)(undoGroup);deleteShape(undoGroup);undoGroup=nullptr;}
+   if(undoGroup){fn<void(*)(void*)>(profile->rollbackUndo)(undoGroup);deleteShape(undoGroup);undoGroup=nullptr;}
    log(e.what());setText(error,e.what());setEnabled(apply,false);failed=true;
   }
  }

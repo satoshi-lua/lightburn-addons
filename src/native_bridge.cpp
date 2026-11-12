@@ -1,12 +1,10 @@
-// Version-bound adapter for the user's LightBurn 2.1.04 x64 build.
-// Qt types stay opaque; every address is gated by the loader's SHA-256 check.
+// Native adapter for exact LightBurn Windows x64 builds.
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -17,16 +15,18 @@
 #include "request_io.h"
 #include "compensation.h"
 #include "preview_svg.h"
+#include "verified_image.h"
 
 using byte=unsigned char;
 namespace fs=std::filesystem;
 struct List { void* header{}; void** data{}; int64_t size{}; };
 static_assert(sizeof(List)==24);
-struct String { byte storage[24]{}; };
+struct alignas(void*) String { byte storage[24]{}; };
 struct Element { double x,y; int type; int pad; };
 using Params=dtw::Parameters;
 static HMODULE module;
 static uintptr_t base;
+static const lightburn::Profile* profile;
 static HWND mainHwnd;
 static void* mainWidget;
 static HHOOK hook;
@@ -44,8 +44,8 @@ template<class T> T& at(void* p,size_t o) {return *reinterpret_cast<T*>(static_c
 static void log(const std::string& message) {
  std::ofstream f(home/L"bridge.log",std::ios::app); f<<message<<"\n";
 }
-static void* allocate(size_t n) {return fn<void*(*)(size_t)>(0xcce530)(n);}
-static void releaseList(List& l) {fn<void(*)(void*)>(0x1f3b0)(&l); l={};}
+static void* allocate(size_t n) {return fn<void*(*)(size_t)>(profile->allocate)(n);}
+static void releaseList(List& l) {fn<void(*)(void*)>(profile->releaseList)(&l); l={};}
 static List retain(const List& l) {
  List r=l; if(r.header) InterlockedIncrement(static_cast<volatile LONG*>(r.header)); return r;
 }
@@ -103,10 +103,10 @@ static void validate(const Params& p,const Session& s) {
   throw std::runtime_error("Dimensions are out of range.");
 }
 static void* undoGroup=nullptr;
-static void addNode(void* node) {fn<void(*)(void*,void*,void*)>(0x20570)(static_cast<byte*>(undoGroup)+0x30,nullptr,node);}
+static void addNode(void* node) {fn<void(*)(void*,void*,void*)>(profile->addUndoNode)(static_cast<byte*>(undoGroup)+0x30,nullptr,node);}
 static void commit(Session& s,const Params& p) {
  validate(p,s);
- auto gui=*reinterpret_cast<byte**>(base+0x1948bb0);
+ auto gui=*reinterpret_cast<byte**>(base+profile->editorContext);
  auto& current=*reinterpret_cast<List*>(gui+0xe8);
  if(current.size!=s.originals.size) throw std::runtime_error("The selection changed. Reopen the tool.");
  for(int64_t i=0;i<current.size;i++) if(current.data[i]!=s.originals.data[i]) throw std::runtime_error("The selection changed.");
@@ -123,18 +123,18 @@ static void commit(Session& s,const Params& p) {
    if(!std::isfinite(x)||std::abs(x)>1e7) throw std::runtime_error("Geometry is out of range.");
    xy[0]=static_cast<float>(x); // All primitives were flattened to lines.
   }
-  fn<void(*)(void*)>(0x2eb8d0)(path);
+  fn<void(*)(void*)>(profile->computeBounds)(path);
  }
- undoGroup=fn<void*(*)(void*)>(0x99530)(allocate(0x50));
+ undoGroup=fn<void*(*)(void*)>(profile->makeUndoGroup)(allocate(0x50));
  String name;stringInit(name,s.single?"Taper Warp v2":"Dual Taper Warp");
  qt<void*(*)(void*,const void*)>(L"Qt6Core.dll","??4QString@@QEAAAEAV0@AEBV0@@Z")(static_cast<byte*>(undoGroup)+0x18,&name);
  stringFree(name);
- addNode(fn<void*(*)(void*,const List*,void*,bool)>(0x918a0)(allocate(0x40),&s.paths,nullptr,false));
- addNode(fn<void*(*)(void*,const List*)>(0x92b50)(allocate(0x48),&s.paths));
- addNode(fn<void*(*)(void*,const List*,bool,bool)>(0x97730)(allocate(0x68),&s.originals,false,false));
- fn<void(*)(void*,void*)>(0xa06d0)(reinterpret_cast<void*>(base+0x19493c8),undoGroup);
+ addNode(fn<void*(*)(void*,const List*,void*,bool)>(profile->makeUndoAddShapes)(allocate(0x40),&s.paths,nullptr,false));
+ addNode(fn<void*(*)(void*,const List*)>(profile->makeUndoSelection)(allocate(0x48),&s.paths));
+ addNode(fn<void*(*)(void*,const List*,bool,bool)>(profile->makeUndoDeleteShapes)(allocate(0x68),&s.originals,false,false));
+ fn<void(*)(void*,void*)>(profile->submitUndo)(reinterpret_cast<void*>(base+profile->undoManager),undoGroup);
  undoGroup=nullptr;s.committed=true;
- fn<bool(*)(int)>(0x29480)(1001); // Same document-change notification as Taper Warp.
+ fn<bool(*)(int)>(profile->sendEvent)(1001); // Same document-change notification as Taper Warp.
 }
 static void finishSession() {
  delete session;session=nullptr;opening=false;
@@ -145,7 +145,7 @@ static void prepareSession(Session& s) {
  int64_t count=0;
  for(int64_t i=0;i<s.paths.size;i++) {
   auto path=s.paths.data[i];
-  fn<void(*)(void*,float)>(0x3043b0)(path,.25f);
+  fn<void(*)(void*,float)>(profile->limitPrimLength)(path,.25f);
   auto& vertices=at<List>(path,0xf8);
   count+=vertices.size;
   if(count>500000||vertices.size<0) throw std::runtime_error("The selection exceeds 500,000 subdivided vertices.");
@@ -158,7 +158,7 @@ static void prepareSession(Session& s) {
   }
  }
  if(!count||s.maxx-s.minx<.0001||s.maxy-s.miny<.0001) throw std::runtime_error("Select artwork with a positive width and height.");
- auto coord=*reinterpret_cast<byte**>(base+0x1948e28);
+ auto coord=*reinterpret_cast<byte**>(base+profile->coordinateMode);
  if(!coord) throw std::runtime_error("Could not read the editor orientation.");
  // This flag describes the host coordinate origin, not a request to invert Y.
  // Use its complement to map the artwork into the preview's top-down axis.
@@ -166,7 +166,7 @@ static void prepareSession(Session& s) {
  s.flip=!coord[3];
  for(int64_t i=0;i<s.paths.size;i++) {
   alignas(16) byte painterPath[64]{};
-  fn<void*(*)(void*,void*)>(0x2e28c0)(s.paths.data[i],painterPath);
+  fn<void*(*)(void*,void*)>(profile->buildPainterPath)(s.paths.data[i],painterPath);
   int n=qt<int(*)(void*)>(L"Qt6Gui.dll","?elementCount@QPainterPath@@QEBAHXZ")(painterPath);
   dtw::PreviewPath points;
   points.reserve(n);
@@ -187,13 +187,13 @@ static void prepareSession(Session& s) {
 static void openDialog(bool single) {
  if(opening)return;opening=true;
  try {
-  auto gui=*reinterpret_cast<byte**>(base+0x1948bb0);
+  auto gui=*reinterpret_cast<byte**>(base+profile->editorContext);
   if(!gui) throw std::runtime_error("The editor is unavailable.");
   auto& selection=*reinterpret_cast<List*>(gui+0xe8);
   if(selection.size<=0||selection.size>10000) throw std::runtime_error("Select the vector artwork you want to warp.");
   for(int64_t i=0;i<selection.size;i++) if(!supported(selection.data[i])) throw std::runtime_error("Select vectors only. Remove images and 3D models from the selection.");
   session=new Session;session->single=single;session->originals=retain(selection);
-  for(int64_t i=0;i<selection.size;i++) fn<void(*)(void*,List*,float)>(0x2f36f0)(selection.data[i],&session->paths,.01f);
+  for(int64_t i=0;i<selection.size;i++) fn<void(*)(void*,List*,float)>(profile->flatten)(selection.data[i],&session->paths,.01f);
   if(!session->paths.size) throw std::runtime_error("Could not convert the vector artwork.");
   prepareSession(*session);
   {NativeDialog dialog(*session);dialog.exec();}
@@ -217,7 +217,7 @@ static void *singleAction=nullptr,*dualAction=nullptr;
 static void updateMenuState() {
  bool enabled=false;
  if(!opening) {
-  auto gui=*reinterpret_cast<byte**>(base+0x1948bb0);
+  auto gui=*reinterpret_cast<byte**>(base+profile->editorContext);
   if(gui) {
    const auto& selected=*reinterpret_cast<const List*>(gui+0xe8);
    enabled=selected.size>0&&selected.size<=10000;
@@ -243,7 +243,7 @@ static void installMenu() {
  connectCallback(target,"?aboutToShow@QMenu@@QEAAXXZ","?staticMetaObject@QMenu@@2UQMetaObject@@B",L"Qt6Widgets.dll",mainWidget,[]{updateMenuState();});
  updateMenuState();
  log("Installed Taper Warp v2 and Dual Taper Warp below Taper Warp");
- std::ofstream(home/L"ready.txt")<<GetCurrentProcessId()<<" 0.3.1";
+ std::ofstream(home/L"ready.txt")<<GetCurrentProcessId()<<" "<<lightburn::packageVersion;
 }
 static LRESULT CALLBACK getMessage(int code,WPARAM w,LPARAM l) {
  if(code>=0&&!initialized) {
@@ -255,7 +255,7 @@ static LRESULT CALLBACK getMessage(int code,WPARAM w,LPARAM l) {
    installMenu();
   }catch(const std::exception& e) {
    log(e.what());
-   std::ofstream(home/(L"startup-"+std::to_wstring(GetCurrentProcessId())+L"-031.error"))<<e.what();
+   std::ofstream(home/(L"startup-"+std::to_wstring(GetCurrentProcessId())+lightburn::startupErrorSuffix))<<e.what();
    MessageBoxA(mainHwnd,e.what(),"Dual Taper Warp",MB_OK|MB_ICONERROR);
   }
   if(hook) {UnhookWindowsHookEx(hook);hook=nullptr;}
@@ -270,19 +270,31 @@ static BOOL CALLBACK findWindow(HWND w,LPARAM param) {
  return TRUE;
 }
 static DWORD WINAPI initialize(void*) {
- wchar_t path[MAX_PATH];GetModuleFileNameW(module,path,MAX_PATH);home=fs::path(path).parent_path();
- base=reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
- // Secondary in-process gate: exact Update prologue from the analysed image.
- const byte prologue[]={0x48,0x8b,0xc4,0x48,0x89,0x58,0x10,0x48,0x89,0x70,0x18};
- if(memcmp(reinterpret_cast<void*>(base+0x6834c0),prologue,sizeof(prologue))) {log("Unsupported binary prologue");return 1;}
- log("Bridge 0.3.1: waiting for editor window");
+ wchar_t path[32768]{};
+ const auto length=GetModuleFileNameW(module,path,32768);
+ if(!length||length==32768)return 1;
+ home=fs::path(path).parent_path();
+ try {
+  const auto hostLength=GetModuleFileNameW(nullptr,path,32768);
+  if(!hostLength||hostLength==32768)throw std::runtime_error("Could not locate the host executable.");
+  profile=lightburn::findProfile(lightburn::ImageFile(path).sha256());
+  if(!profile)throw std::runtime_error("Unsupported LightBurn executable SHA-256.");
+  base=reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+  if(!lightburn::matchesMappedImage(GetCurrentProcess(),base,*profile))
+   throw std::runtime_error("The mapped LightBurn image does not match its build profile.");
+ }catch(const std::exception& e) {
+  log(e.what());
+  std::ofstream(home/(L"startup-"+std::to_wstring(GetCurrentProcessId())+lightburn::startupErrorSuffix))<<e.what();
+  return 1;
+ }
+ log(std::string("Bridge ")+lightburn::packageVersion+" on LightBurn "+profile->version+": waiting for editor window");
  for(int attempt=0;attempt<240&&!mainHwnd;attempt++) {
   EnumWindows(findWindow,0);
   if(!mainHwnd) Sleep(250);
  }
  if(!mainHwnd){
   log("No main editor window after 60 seconds");
-  std::ofstream(home/(L"startup-"+std::to_wstring(GetCurrentProcessId())+L"-031.error"))<<"The editor window did not appear within 60 seconds. Close any startup dialogs and restart LightBurn.";
+  std::ofstream(home/(L"startup-"+std::to_wstring(GetCurrentProcessId())+lightburn::startupErrorSuffix))<<"The editor window did not appear within 60 seconds. Close any startup dialogs and restart LightBurn.";
   return 1;
  }
  try {
@@ -292,7 +304,7 @@ static DWORD WINAPI initialize(void*) {
   PostThreadMessageW(tid,WM_NULL,0,0);
  }catch(const std::exception& e) {
   log(e.what());
-  std::ofstream(home/(L"startup-"+std::to_wstring(GetCurrentProcessId())+L"-031.error"))<<e.what();
+  std::ofstream(home/(L"startup-"+std::to_wstring(GetCurrentProcessId())+lightburn::startupErrorSuffix))<<e.what();
   return 1;
  }
  return 0;
