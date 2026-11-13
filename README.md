@@ -15,13 +15,21 @@ Each tool can save its own geometry profiles. Both tools share engraving-positio
 
 ## Screenshots
 
-**Dual Taper Warp** shows the compensated design next to the vessel profile, with the upper straight section, transition, and lower straight section marked.
+**Dual Taper Warp** previews compensation across three vessel zones. The dialog shows the selected geometry and engraving position profiles.
 
-![Dual Taper Warp dialog with a compensated vector and a dimensioned three-zone vessel profile](docs/screenshots/dual-taper-warp.png)
+![Dual Taper Warp with saved geometry and position profiles and a three-zone vessel preview](docs/screenshots/dual-taper-warp.png)
 
-**Taper Warp v2** shows the compensated design inside the virtual reference rectangle.
+**Place Geometry Reference** lets you move or rotate the T1 rectangle on the LightBurn canvas. Select **Confirm Position** when it is in place.
 
-![Taper Warp v2 dialog with the design position slider, reference rectangle, and tapered vessel profile](docs/screenshots/taper-warp-v2-dialog.png)
+![Selected horizontal T1 rectangle on the LightBurn canvas beside the Confirm Position and Cancel buttons](docs/screenshots/place-geometry-reference.png)
+
+**Save Position Profile** shows the captured coordinates and rotation so you can check them before naming the profile.
+
+![Save Position Profile dialog showing the captured X and Y coordinates and a 90-degree counterclockwise rotation](docs/screenshots/save-position-profile.png)
+
+**Taper Warp v2** shows the compensated design inside the virtual reference rectangle. The selected position profile controls where the result goes on the canvas.
+
+![Taper Warp v2 with a virtual reference rectangle, Distance from top control, and saved engraving position](docs/screenshots/taper-warp-v2-dialog.png)
 
 Both tools appear under **Taper Warp** in the **Laser Tools** menu.
 
@@ -34,7 +42,7 @@ The Windows x64 launcher verifies the full executable SHA-256 and checks the map
 | LightBurn | Executable SHA-256 | Verification |
 | --- | --- | --- |
 | 2.1.04 | `68a80dabab4b05c3773a231d3aaaa0adf64df61b4bee2aeced6fa369b0ef149b` | Existing adapter carried forward |
-| 2.2.01 | `1c7c1d2d0843535bcd3188b569ca2b1ace5c1281eb0324de9aa881ebb65b4b3b` | Static checks and standalone tests passed. Manual editor checks pending. |
+| 2.2.01 | `1c7c1d2d0843535bcd3188b569ca2b1ace5c1281eb0324de9aa881ebb65b4b3b` | Static checks and standalone tests passed. |
 
 See the [installation guide](INSTALL.md) for the portable ZIP and manual test steps.
 
