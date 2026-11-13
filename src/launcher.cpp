@@ -114,7 +114,7 @@ static void run(const fs::path& home, const fs::path& executable) {
  const lightburn::ImageFile image(executable);
  const auto* profile=lightburn::findProfile(image.sha256());
  if(!profile)throw std::runtime_error("Unsupported LightBurn executable SHA-256. Select a supported Windows x64 build of LightBurn 2.1.04 or 2.2.01.");
- auto dll=home/library;if(!fs::is_regular_file(dll))throw std::runtime_error("Place native_bridge_v032.dll in the same folder as the launcher.");
+ auto dll=home/library;if(!fs::is_regular_file(dll))throw std::runtime_error("Place native_bridge_v0312.dll in the same folder as the launcher.");
  auto backup=home/L"backups"/std::string(profile->sha256,8)/L"LightBurn.exe";fs::create_directories(backup.parent_path());
  if(!fs::exists(backup))fs::copy_file(executable,backup);
  if(lightburn::ImageFile(backup).sha256()!=profile->sha256)

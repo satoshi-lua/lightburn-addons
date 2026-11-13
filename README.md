@@ -9,6 +9,10 @@ An unofficial extension that pre-compensates vector designs for engraving on tap
 
 Both tools preserve the design height, save their settings separately, and let you compare the compensated preview with the original. **Apply** creates an undo step in LightBurn. Text is converted to paths, and groups may be converted to individual paths. Select vector artwork to use either tool.
 
+Each tool can save its own geometry profiles. Both tools share engraving-position profiles, which capture the center of the current selection and the chosen placement rotation. Enable **Place at saved position** to rotate the warped result by the chosen angle and center it at that position. One **Undo** reverses the warp, rotation, and placement.
+
+**Place Geometry Reference…** adds a movable T1 rectangle to the canvas for calibrating an engraving position. Profiles saved from the rectangle keep the artwork's **Distance from top** relative to the engraving area.
+
 ## Screenshots
 
 **Dual Taper Warp** shows the compensated design next to the vessel profile, with the upper straight section, transition, and lower straight section marked.

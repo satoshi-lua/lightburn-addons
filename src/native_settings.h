@@ -8,6 +8,25 @@ struct NativeSettings {
   qt<void*(*)(void*,const void*,int,void*)>(L"Qt6Core.dll","??0QSettings@@QEAA@AEBVQString@@W4Format@0@PEAVQObject@@@Z")(object,&path,1,nullptr);
  }
  ~NativeSettings(){deleteQtObject(object);}
+ std::string text(const std::string& key) {
+  NativeString name(key);alignas(16) byte value[64]{};String result;
+  qt<void*(*)(void*,void*,const void*)>(L"Qt6Core.dll","?value@QSettings@@QEBA?AVQVariant@@AEBVQString@@@Z")(object,value,&name);
+  qt<void*(*)(void*,void*)>(L"Qt6Core.dll","?toString@QVariant@@QEBA?AVQString@@XZ")(value,&result);
+  auto text=utf8(result);
+  stringFree(result);
+  qt<void(*)(void*)>(L"Qt6Core.dll","??1QVariant@@QEAA@XZ")(value);
+  return text;
+ }
+ void setTextValue(const std::string& key,const std::string& text) {
+  NativeString name(key),content(text);alignas(16) byte value[64]{};
+  qt<void*(*)(void*,const void*)>(L"Qt6Core.dll","??0QVariant@@QEAA@AEBVQString@@@Z")(value,&content);
+  qt<void(*)(void*,const void*,const void*)>(L"Qt6Core.dll","?setValue@QSettings@@QEAAXAEBVQString@@AEBVQVariant@@@Z")(object,&name,value);
+  qt<void(*)(void*)>(L"Qt6Core.dll","??1QVariant@@QEAA@XZ")(value);
+ }
+ bool sync() {
+  qt<void(*)(void*)>(L"Qt6Core.dll","?sync@QSettings@@QEAAXXZ")(object);
+  return qt<int(*)(void*)>(L"Qt6Core.dll","?status@QSettings@@QEBA?AW4Status@1@XZ")(object)==0;
+ }
  double get(const char* key,double fallback) {
   NativeString name(prefix+key);alignas(16) byte def[64]{},value[64]{};
   qt<void*(*)(void*,double)>(L"Qt6Core.dll","??0QVariant@@QEAA@N@Z")(def,fallback);

@@ -58,8 +58,27 @@ static void spinRange(void* spin,double low,double high) {qt<void(*)(void*,doubl
 static int sliderValue(void* slider) {return qt<int(*)(void*)>(L"Qt6Widgets.dll","?value@QAbstractSlider@@QEBAHXZ")(slider);}
 static void sliderSet(void* slider,int value) {qt<void(*)(void*,int)>(L"Qt6Widgets.dll","?setValue@QAbstractSlider@@QEAAXH@Z")(slider,value);}
 static bool checked(void* check) {return qt<bool(*)(void*)>(L"Qt6Widgets.dll","?isChecked@QAbstractButton@@QEBA_NXZ")(check);}
+static void setChecked(void* check,bool value) {
+ qt<void(*)(void*,bool)>(L"Qt6Widgets.dll","?setChecked@QAbstractButton@@QEAAX_N@Z")(check,value);
+}
 
 #include "native_settings.h"
+#include "geometry_reference.h"
+
+struct PresetPicker {
+ void *combo=nullptr,*replace=nullptr;
+ int index() const {return qt<int(*)(void*)>(L"Qt6Widgets.dll","?currentIndex@QComboBox@@QEBAHXZ")(combo)-1;}
+ void select(int index) {
+  qt<void(*)(void*,int)>(L"Qt6Widgets.dll","?setCurrentIndex@QComboBox@@QEAAXH@Z")(combo,index+1);
+ }
+ void insert(int row,const std::string& text) {
+  NativeString name(text);
+  alignas(16) byte value[64]{};
+  qt<void*(*)(void*,double)>(L"Qt6Core.dll","??0QVariant@@QEAA@N@Z")(value,0.);
+  qt<void(*)(void*,int,const void*,const void*)>(L"Qt6Widgets.dll","?insertItem@QComboBox@@QEAAXHAEBVQString@@AEBVQVariant@@@Z")(combo,row,&name,value);
+  qt<void(*)(void*)>(L"Qt6Core.dll","??1QVariant@@QEAA@XZ")(value);
+ }
+};
 
 static void* taperMenu=nullptr;
 struct NativeDialog;
@@ -73,8 +92,15 @@ struct NativeDialog {
  void* dialog=nullptr;
  std::array<void*,6> spins{};
  void *positionSlider=nullptr,*curve=nullptr,*curveText=nullptr,*transition=nullptr,*preview=nullptr,*error=nullptr,*apply=nullptr,*zones=nullptr;
+ void *place=nullptr,*positionText=nullptr;
+ PresetPicker geometryPicker,positionPicker,rotationPicker;
+ static constexpr std::array rotations{dtw::Rotation::None,dtw::Rotation::Clockwise,dtw::Rotation::Counterclockwise,dtw::Rotation::HalfTurn};
+ std::vector<dtw::GeometryPreset> geometryPresets;
+ std::vector<dtw::PositionPreset> positionPresets;
+ static constexpr const char* positionKey="EngravingPositions/profiles";
  std::string unit="mm",lastRenderKey;
  UINT_PTR timer=0;
+ static constexpr int placeReferenceResult=2;
  NativeDialog(Session& s):source(s),settings(s.single) {
   if(taperMenu) {
    String title;qt<void*(*)(void*,void*)>(L"Qt6Widgets.dll","?title@QMenu@@QEBA?AVQString@@XZ")(taperMenu,&title);
@@ -89,6 +115,232 @@ struct NativeDialog {
  }
  ~NativeDialog(){if(timer)KillTimer(nullptr,timer);activeDialog=nullptr;if(dialog)deleteQtObject(dialog);}
  std::string tr(const char* es,const char* en)const{return english?en:es;}
+ template<class Preset>
+ void buildPicker(PresetPicker& picker,void* parent,void* layout,const std::string& title,
+                  const std::string& empty,const std::vector<Preset>& entries,
+                  std::function<void()> choose,std::function<void(bool)> savePreset) {
+  addWidget(layout,label(parent,title));
+  picker.combo=allocate(0x100);
+  qt<void*(*)(void*,void*)>(L"Qt6Widgets.dll","??0QComboBox@@QEAA@PEAVQWidget@@@Z")(picker.combo,parent);
+  picker.insert(0,empty);
+  for(size_t i=0;i<entries.size();++i)picker.insert(int(i+1),entries[i].name);
+  addWidget(layout,picker.combo);
+  auto buttons=boxLayout(false);
+  addWidget(buttons,button(parent,tr("Guardar como…","Save as…"),[savePreset]{savePreset(false);}),1);
+  picker.replace=button(parent,tr("Actualizar","Update"),[savePreset]{savePreset(true);});
+  addWidget(buttons,picker.replace,1);addLayout(layout,buttons);
+  connectCallback(picker.combo,"?activated@QComboBox@@QEAAXH@Z","?staticMetaObject@QComboBox@@2UQMetaObject@@B",L"Qt6Widgets.dll",parent,std::move(choose));
+ }
+ template<class Preset>
+ int remembered(const std::vector<Preset>& entries,const char* key) {
+  const auto name=settings.text(settings.prefix+key);
+  const auto found=std::find_if(entries.begin(),entries.end(),[&](const auto& p){return p.name==name;});
+  return found==entries.end()?-1:int(found-entries.begin());
+ }
+ std::string askPresetName(const std::string& details) {
+  NativeString title(details.empty()?tr("Guardar perfil","Save profile"):tr("Guardar perfil de posición","Save Position Profile")),
+   prompt(details.empty()?tr("Nombre del perfil","Profile name"):details+"\n"+tr("Nombre del perfil","Profile name")),initial("");
+  String answer;bool accepted=false;
+  qt<void*(*)(void*,void*,const void*,const void*,int,const void*,bool*,int,int)>(L"Qt6Widgets.dll","?getText@QInputDialog@@SA?AVQString@@PEAVQWidget@@AEBV2@1W4EchoMode@QLineEdit@@1PEA_NV?$QFlags@W4WindowType@Qt@@@@V?$QFlags@W4InputMethodHint@Qt@@@@@Z")(&answer,dialog,&title,&prompt,0,&initial,&accepted,0,0);
+  auto name=utf8(answer);stringFree(answer);
+  if(!accepted)return {};
+  auto first=name.find_first_not_of(" \t\r\n");
+  if(first==std::string::npos||name.size()>120||name.find_first_of("\r\n")!=std::string::npos)
+   throw std::runtime_error(tr("Escribe un nombre de perfil válido.","Enter a valid profile name."));
+  return name.substr(first,name.find_last_not_of(" \t\r\n")-first+1);
+ }
+ template<class Preset>
+ bool savePreset(PresetPicker& picker,std::vector<Preset>& entries,const std::string& key,Preset value,bool replace,const std::string& details={}) {
+  int index=picker.index();
+  if(replace) {
+   if(index<0||size_t(index)>=entries.size())return false;
+   value.name=entries[index].name;
+  } else {
+   if(entries.size()>=100)throw std::runtime_error(tr("Ya hay 100 perfiles guardados.","There are already 100 saved profiles."));
+   value.name=askPresetName(details);
+   if(value.name.empty())return false;
+   if(std::any_of(entries.begin(),entries.end(),[&](const auto& entry){return entry.name==value.name;}))
+    throw std::runtime_error(tr("Ese nombre ya existe. Usa otro nombre o elige Actualizar.","That name already exists. Choose another name or use Update."));
+   index=int(entries.size());
+  }
+  auto next=entries;
+  if(replace)next[index]=std::move(value);
+  else next.push_back(std::move(value));
+  const auto previous=settings.text(key);
+  settings.setTextValue(key,dtw::encodePresets(next));
+  if(!settings.sync()) {
+   settings.setTextValue(key,previous);
+   throw std::runtime_error(tr("No se pudo guardar el perfil.","Could not save the profile."));
+  }
+  entries=std::move(next);
+  if(!replace)picker.insert(index+1,entries[index].name);
+  picker.select(index);
+  return true;
+ }
+ void presetAction(const std::function<void()>& action) {
+  try {action();}
+  catch(const std::exception& e) {
+   log(e.what());
+   NativeString message(e.what()),title(tr("Perfiles","Profiles"));
+   MessageBoxW(mainHwnd,at<const wchar_t*>(&message,8),at<const wchar_t*>(&title,8),MB_OK|MB_ICONINFORMATION);
+  }
+ }
+ void chooseGeometry() {
+  const int index=geometryPicker.index();
+  setEnabled(geometryPicker.replace,index>=0);
+  if(index<0)return;
+  const auto& p=geometryPresets.at(index).geometry;
+  const double values[]={p.top,p.upper,p.bottom,p.lower,p.height};
+  for(int i=0;i<5;++i)if(spins[i])spinSet(spins[i],values[i]*unitScale);
+  if(curve)sliderSet(curve,int(std::lround(p.curve*100)));
+  update();
+ }
+ dtw::Rotation selectedRotation() const {
+  return rotations.at(rotationPicker.index()+1);
+ }
+ std::optional<dtw::Placement> targetPosition() const {
+  const int index=positionPicker.index();
+  if(!checked(place)||index<0)return std::nullopt;
+  auto saved=positionPresets.at(index).placement;
+  saved.rotation=selectedRotation();
+  return saved;
+ }
+ std::string positionSummary(dtw::Placement saved) const {
+  std::ostringstream text;
+  text<<std::fixed<<std::setprecision(std::abs(unitScale-1)<.0001?2:4)
+   <<"X "<<saved.center.x*unitScale<<" "<<unit<<"  ·  Y "<<saved.center.y*unitScale<<" "<<unit;
+  text<<(saved.geometryReference?tr("  ·  Centro del área","  ·  Area center"):tr("  ·  Centro","  ·  Center"));
+  return text.str();
+ }
+ void showPosition() {
+  const int index=positionPicker.index();
+  setEnabled(positionPicker.replace,index>=0);setEnabled(place,index>=0);
+  if(index<0) {
+   rotationPicker.select(-1);
+   setChecked(place,false);setText(positionText,tr("Sin posición guardada","No saved position"));return;
+  }
+  const auto& saved=positionPresets.at(index).placement;
+  const auto rotation=std::find(rotations.begin(),rotations.end(),saved.rotation);
+  rotationPicker.select(int(rotation-rotations.begin())-1);
+  setText(positionText,positionSummary(saved));
+ }
+ std::string rotationText(dtw::Rotation rotation) const {
+  switch(rotation) {
+   case dtw::Rotation::Clockwise:return tr("90° horario","90° clockwise");
+   case dtw::Rotation::Counterclockwise:return tr("90° antihorario","90° counterclockwise");
+   case dtw::Rotation::HalfTurn:return "180°";
+   default:return tr("0° — Sin giro","0° — No rotation");
+  }
+ }
+ void placeGeometryReference() {
+  const auto p=parameters();
+  if(!dtw::validGeometry(p))throw std::runtime_error(tr("Revisa las medidas del recipiente.","Check the vessel dimensions."));
+  const auto widgets=L"Qt6Widgets.dll";
+  constexpr int toolWindow=0x0b; // Qt::Tool
+  constexpr int doesNotAcceptFocus=0x00200000; // Qt::WindowDoesNotAcceptFocus
+  auto panel=allocate(0x100);
+  qt<void*(*)(void*,void*,int)>(widgets,"??0QDialog@@QEAA@PEAVQWidget@@V?$QFlags@W4WindowType@Qt@@@@@Z")(
+   panel,mainWidget,toolWindow|doesNotAcceptFocus);
+  struct PanelCleanup {void* panel;~PanelCleanup(){deleteQtObject(panel);}} cleanup{panel};
+  NativeString title(tr("Colocar referencia geométrica","Place Geometry Reference"));
+  qt<void(*)(void*,const void*)>(widgets,"?setWindowTitle@QWidget@@QEAAXAEBVQString@@@Z")(panel,&title);
+  const auto turn=selectedRotation();
+  const auto dimensions=dtw::referenceSize(p.height,turn);
+  std::optional<dtw::Placement> saved;
+  GeometryReference* guide=nullptr;
+  auto layout=boxLayout(true,panel);
+  auto instructions=label(panel,tr("Mueve o gira el rectángulo T1 en el lienzo.","Move or rotate the T1 rectangle on the canvas."));
+  addWidget(layout,instructions);
+  auto buttons=boxLayout(false);
+  auto confirmButton=button(panel,tr("Confirmar posición","Confirm Position"),[&,this]{
+   const auto center=guide->center();
+   if(!center) {
+    setText(instructions,tr("No se encontró el rectángulo de referencia.","Could not find the reference rectangle."));
+    return;
+   }
+   const auto angle=guide->rotation(turn,source.flip);
+   if(!angle) {
+    setText(instructions,tr("Usa un giro de 0°, 90° o 180°.","Use a rotation of 0°, 90°, or 180°."));
+    return;
+   }
+   saved=dtw::Placement{*center,*angle,true};
+   qt<void(*)(void*)>(L"Qt6Widgets.dll","?accept@QDialog@@UEAAXXZ")(panel);
+  });
+  auto cancelButton=button(panel,tr("Cancelar","Cancel"),[panel]{
+   qt<void(*)(void*)>(L"Qt6Widgets.dll","?reject@QDialog@@UEAAXXZ")(panel);
+  });
+  constexpr int noFocus=0; // Qt::NoFocus
+  const auto setFocusPolicy=qt<void(*)(void*,int)>(widgets,"?setFocusPolicy@QWidget@@QEAAXW4FocusPolicy@Qt@@@Z");
+  setFocusPolicy(panel,noFocus);
+  setFocusPolicy(confirmButton,noFocus);
+  setFocusPolicy(cancelButton,noFocus);
+  addWidget(buttons,confirmButton);
+  addWidget(buttons,cancelButton);
+  addLayout(layout,buttons);
+  alignas(16) byte loop[128]{};
+  qt<void*(*)(void*,void*)>(L"Qt6Core.dll","??0QEventLoop@@QEAA@PEAVQObject@@@Z")(loop,nullptr);
+  struct LoopCleanup {void* loop;~LoopCleanup(){qt<void(*)(void*)>(L"Qt6Core.dll","??1QEventLoop@@UEAA@XZ")(loop);}} loopCleanup{loop};
+  int result=0;
+  connectCallback(panel,"?finished@QDialog@@QEAAXH@Z","?staticMetaObject@QDialog@@2UQMetaObject@@B",widgets,panel,[&]{
+   result=qt<int(*)(void*)>(L"Qt6Widgets.dll","?result@QDialog@@QEBAHXZ")(panel);
+   qt<void(*)(void*,int)>(L"Qt6Core.dll","?exit@QEventLoop@@QEAAXH@Z")(loop,result);
+  });
+  {
+   GeometryReference reference(source,dimensions);
+   guide=&reference;
+   constexpr int showWithoutActivating=98; // Qt::WA_ShowWithoutActivating
+   qt<void(*)(void*,int,bool)>(widgets,"?setAttribute@QWidget@@QEAAXW4WidgetAttribute@Qt@@_N@Z")(panel,showWithoutActivating,true);
+   qt<void(*)(void*)>(widgets,"?show@QWidget@@QEAAXXZ")(panel);
+   reference.refreshSelection();
+   // Reapply focus once the message loop has handled the window transition.
+   timer=SetTimer(nullptr,0,USER_TIMER_MINIMUM,finishPlacementFocus);
+   qt<int(*)(void*,int)>(L"Qt6Core.dll","?exec@QEventLoop@@QEAAHV?$QFlags@W4ProcessEventsFlag@QEventLoop@@@@@Z")(loop,0);
+   if(timer) {
+    KillTimer(nullptr,timer);
+    timer=0;
+   }
+  }
+  if(result!=1||!saved||!IsWindow(mainHwnd))return;
+  if(savePreset(positionPicker,positionPresets,positionKey,dtw::PositionPreset{"",*saved},false,
+     positionSummary(*saved)+"  ·  "+rotationText(saved->rotation))) {
+   showPosition();setChecked(place,true);
+  }
+ }
+ void buildEngravingPosition(void* root) {
+  auto group=groupBox(dialog,tr("Posición de grabado","Engraving position"));
+  auto layout=boxLayout(false,group),profilesLayout=boxLayout(true),placement=boxLayout(true);
+  buildPicker(positionPicker,group,profilesLayout,tr("Perfil de posición","Position profile"),
+   tr("Sin perfil","No profile"),positionPresets,[this]{showPosition();},
+   [this](bool replace){presetAction([&]{
+    auto saved=dtw::Placement{{(source.minx+source.maxx)/2,(source.miny+source.maxy)/2},selectedRotation()};
+    const int index=positionPicker.index();
+    if(replace&&index>=0&&positionPresets.at(index).placement.geometryReference) {
+     saved=positionPresets.at(index).placement;
+     saved.rotation=selectedRotation();
+    }
+    const auto center=saved.center;
+    if(!dtw::validPosition(center))throw std::runtime_error(tr("La posición está fuera de rango.","Position is out of range."));
+    savePreset(positionPicker,positionPresets,positionKey,dtw::PositionPreset{"",saved},replace);
+    showPosition();
+   });});
+  NativeString text(tr("Colocar en la posición guardada","Place at saved position"));
+  place=allocate(0x100);
+  qt<void*(*)(void*,const void*,void*)>(L"Qt6Widgets.dll","??0QCheckBox@@QEAA@AEBVQString@@PEAVQWidget@@@Z")(place,&text,group);
+  positionText=label(group,"");
+  addWidget(placement,place);addWidget(placement,positionText);
+  auto rotationRow=boxLayout(false);
+  addWidget(rotationRow,label(group,tr("Rotación al colocar","Placement rotation")));
+  rotationPicker.combo=allocate(0x100);
+  qt<void*(*)(void*,void*)>(L"Qt6Widgets.dll","??0QComboBox@@QEAA@PEAVQWidget@@@Z")(rotationPicker.combo,group);
+  for(size_t i=0;i<rotations.size();++i)rotationPicker.insert(int(i),rotationText(rotations[i]));
+  addWidget(rotationRow,rotationPicker.combo);addLayout(placement,rotationRow);
+  addWidget(placement,button(group,tr("Colocar referencia geométrica…","Place Geometry Reference…"),
+   [this]{qt<void(*)(void*,int)>(L"Qt6Widgets.dll","?done@QDialog@@UEAAXH@Z")(dialog,placeReferenceResult);}));
+  addLayout(layout,profilesLayout);addLayout(layout,placement,1);addWidget(root,group);
+  positionPicker.select(remembered(positionPresets,"lastPositionProfile"));
+  setChecked(place,settings.get("placeAtSavedPosition",0)!=0);
+  showPosition();
+ }
  void row(void* form,const std::string& name,void* widget) {
   NativeString text(name);qt<void(*)(void*,const void*,void*)>(L"Qt6Widgets.dll","?addRow@QFormLayout@@QEAAXAEBVQString@@PEAVQWidget@@@Z")(form,&text,widget);
  }
@@ -107,11 +359,28 @@ struct NativeDialog {
   dialog=allocate(0x100);qt<void*(*)(void*,void*,int)>(L"Qt6Widgets.dll","??0QDialog@@QEAA@PEAVQWidget@@V?$QFlags@W4WindowType@Qt@@@@@Z")(dialog,mainWidget,0);
   NativeString title(source.single?"Taper Warp v2":"Dual Taper Warp");
   qt<void(*)(void*,const void*)>(L"Qt6Widgets.dll","?setWindowTitle@QWidget@@QEAAXAEBVQString@@@Z")(dialog,&title);
-  qt<void(*)(void*,int,int)>(L"Qt6Widgets.dll","?resize@QWidget@@QEAAXHH@Z")(dialog,1100,730);
+  qt<void(*)(void*,int,int)>(L"Qt6Widgets.dll","?resize@QWidget@@QEAAXHH@Z")(dialog,1100,800);
   auto root=boxLayout(true,dialog),body=boxLayout(false),left=boxLayout(true),right=boxLayout(true);
   addLayout(root,body,1);addLayout(body,left);addLayout(body,right,1);
   auto group=groupBox(dialog,tr("Geometría del recipiente","Vessel geometry"));
-  auto form=allocate(0x100);qt<void*(*)(void*,void*)>(L"Qt6Widgets.dll","??0QFormLayout@@QEAA@PEAVQWidget@@@Z")(form,group);
+  auto geometryLayout=boxLayout(true,group);
+  const auto geometryKey=settings.prefix+"geometryProfiles";
+  geometryPresets=dtw::decodePresets<dtw::GeometryPreset>(settings.text(geometryKey),
+   [this](const auto& p){return dtw::validGeometry(p.geometry)&&(!source.single||(!p.geometry.upper&&!p.geometry.lower&&!p.geometry.curve));});
+  positionPresets=dtw::decodePresets<dtw::PositionPreset>(settings.text(positionKey),
+   [](const auto& p){return dtw::validPosition(p.placement.center);});
+  buildPicker(geometryPicker,group,geometryLayout,tr("Perfil de geometría","Geometry profile"),
+   tr("Personalizado","Custom"),geometryPresets,[this]{chooseGeometry();},
+   [this,geometryKey](bool replace){presetAction([&]{
+    auto p=parameters();
+    if(!dtw::validGeometry(p))throw std::runtime_error(tr("Revisa las medidas del recipiente.","Check the vessel dimensions."));
+    savePreset(geometryPicker,geometryPresets,geometryKey,dtw::GeometryPreset{"",p},replace);
+    setEnabled(geometryPicker.replace,geometryPicker.index()>=0);
+   });});
+  geometryPicker.select(remembered(geometryPresets,"lastGeometryProfile"));
+  setEnabled(geometryPicker.replace,geometryPicker.index()>=0);
+  auto form=allocate(0x100);qt<void*(*)(void*,void*)>(L"Qt6Widgets.dll","??0QFormLayout@@QEAA@PEAVQWidget@@@Z")(form,nullptr);
+  addLayout(geometryLayout,form);
   const double defaults[]={source.single?87.:80.,source.single?0.:60.,source.single?73.:70.,source.single?0.:20.,source.single?143.:108.};
   const char* keys[]={"topDiameter","upperStraight","bottomDiameter","lowerStraight","referenceHeight"};
   const std::string names[]={tr("Diámetro superior","Top diameter"),tr("Recta superior","Upper straight"),tr("Diámetro inferior","Bottom diameter"),tr("Recta inferior","Lower straight"),source.single?tr("Altura de referencia","Reference height"):tr("Altura total","Total height")};
@@ -153,6 +422,7 @@ struct NativeDialog {
   zones=allocate(0x100);qt<void*(*)(void*,const void*,void*)>(L"Qt6Widgets.dll","??0QCheckBox@@QEAA@AEBVQString@@PEAVQWidget@@@Z")(zones,&ztext,dialog);
   qt<void(*)(void*,bool)>(L"Qt6Widgets.dll","?setChecked@QAbstractButton@@QEAAX_N@Z")(zones,settings.get("showZones",1)!=0);
   addWidget(options,zones);addLayout(right,options);
+  buildEngravingPosition(root);
   auto buttons=allocate(0x100);qt<void*(*)(void*,int,void*)>(L"Qt6Widgets.dll","??0QDialogButtonBox@@QEAA@V?$QFlags@W4StandardButton@QDialogButtonBox@@@@PEAVQWidget@@@Z")(buttons,0x400|0x400000,dialog);
   apply=qt<void*(*)(void*,int)>(L"Qt6Widgets.dll","?button@QDialogButtonBox@@QEBAPEAVQPushButton@@W4StandardButton@1@@Z")(buttons,0x400);
   NativeString atext(tr("Aplicar","Apply"));qt<void(*)(void*,const void*)>(L"Qt6Widgets.dll","?setText@QAbstractButton@@QEAAXAEBVQString@@@Z")(apply,&atext);
@@ -203,7 +473,7 @@ struct NativeDialog {
   updating=false;
  }
  void applyChanges() {
-  try {auto p=parameters();validate(p,source);commit(source,p);qt<void(*)(void*)>(L"Qt6Widgets.dll","?accept@QDialog@@UEAAXXZ")(dialog);}
+  try {update();if(failed)return;auto p=parameters();validate(p,source);commit(source,p,targetPosition());qt<void(*)(void*)>(L"Qt6Widgets.dll","?accept@QDialog@@UEAAXXZ")(dialog);}
   catch(const std::exception& e) {
    if(undoGroup){fn<void(*)(void*)>(profile->rollbackUndo)(undoGroup);deleteShape(undoGroup);undoGroup=nullptr;}
    log(e.what());setText(error,e.what());setEnabled(apply,false);failed=true;
@@ -211,6 +481,10 @@ struct NativeDialog {
  }
  void save() {
   settings.geometry(dialog,true);
+  const int geometryIndex=geometryPicker.index(),positionIndex=positionPicker.index();
+  settings.setTextValue(settings.prefix+"lastGeometryProfile",geometryIndex<0?"":geometryPresets.at(geometryIndex).name);
+  settings.setTextValue(settings.prefix+"lastPositionProfile",positionIndex<0?"":positionPresets.at(positionIndex).name);
+  settings.set("placeAtSavedPosition",checked(place)?1:0);
   try {
    auto p=parameters();validate(p,source);
    const char* keys[]={"topDiameter","upperStraight","bottomDiameter","lowerStraight","referenceHeight","offset"};
@@ -219,11 +493,25 @@ struct NativeDialog {
    settings.set("curvePercent",p.curve*100);settings.set("showZones",checked(zones)?1:0);
   }catch(const std::exception&){/* Keep previous valid dimensions. */}
  }
+ static void CALLBACK finishPlacementFocus(HWND,UINT,UINT_PTR timerId,DWORD) {
+  if(!activeDialog||activeDialog->timer!=timerId)return;
+  KillTimer(nullptr,timerId);
+  activeDialog->timer=0;
+  try {GeometryReference::refreshSelection();}
+  catch(const std::exception& error) {log(error.what());}
+ }
  static void CALLBACK tick(HWND,UINT,UINT_PTR,DWORD){if(activeDialog)activeDialog->update();}
  int exec() {
-  activeDialog=this;update();timer=SetTimer(nullptr,0,125,tick);
-  if(!timer)throw std::runtime_error(tr("No se pudo actualizar la vista previa.","Could not update the preview."));
-  int result=qt<int(*)(void*)>(L"Qt6Widgets.dll","?exec@QDialog@@UEAAHXZ")(dialog);
-  KillTimer(nullptr,timer);timer=0;save();return result;
+  activeDialog=this;
+  int result=0;
+  do {
+   update();timer=SetTimer(nullptr,0,125,tick);
+   if(!timer)throw std::runtime_error(tr("No se pudo actualizar la vista previa.","Could not update the preview."));
+   result=qt<int(*)(void*)>(L"Qt6Widgets.dll","?exec@QDialog@@UEAAHXZ")(dialog);
+   KillTimer(nullptr,timer);timer=0;
+   if(result==placeReferenceResult)presetAction([this]{placeGeometryReference();});
+  }while(result==placeReferenceResult&&IsWindow(mainHwnd));
+  if(IsWindow(mainHwnd))save();
+  return result;
  }
 };

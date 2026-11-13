@@ -15,6 +15,8 @@
 #include "request_io.h"
 #include "compensation.h"
 #include "preview_svg.h"
+#include "presets.h"
+#include <optional>
 #include "verified_image.h"
 
 using byte=unsigned char;
@@ -97,31 +99,51 @@ struct Session {
 static Session* session=nullptr;
 
 static void validate(const Params& p,const Session& s) {
- const double values[]={p.top,p.upper,p.bottom,p.lower,p.height,p.curve,p.offset};
- for(double v:values) if(!std::isfinite(v)) throw std::runtime_error("Dimensions must be finite.");
- if(p.top<=0||p.bottom<=0||p.height<=0||p.upper<0||p.lower<0||p.height-p.upper-p.lower<=0||p.curve<0||p.curve>1||p.offset<0||p.offset+s.maxy-s.miny>p.height+1e-5||p.top/p.bottom<.1||p.top/p.bottom>10)
+ if(!dtw::validGeometry(p)||!std::isfinite(p.offset)||p.offset<0||p.offset+s.maxy-s.miny>p.height+1e-5)
   throw std::runtime_error("Dimensions are out of range.");
 }
 static void* undoGroup=nullptr;
 static void addNode(void* node) {fn<void(*)(void*,void*,void*)>(profile->addUndoNode)(static_cast<byte*>(undoGroup)+0x30,nullptr,node);}
-static void commit(Session& s,const Params& p) {
+static void commit(Session& s,const Params& p,std::optional<dtw::Placement> position) {
  validate(p,s);
  auto gui=*reinterpret_cast<byte**>(base+profile->editorContext);
  auto& current=*reinterpret_cast<List*>(gui+0xe8);
  if(current.size!=s.originals.size) throw std::runtime_error("The selection changed. Reopen the tool.");
  for(int64_t i=0;i<current.size;i++) if(current.data[i]!=s.originals.data[i]) throw std::runtime_error("The selection changed.");
  double cx=(s.minx+s.maxx)/2;
+ double minX=std::numeric_limits<double>::infinity(),maxX=-minX;
+ for(int64_t i=0;i<s.paths.size;i++) {
+  const auto& vertices=at<List>(s.paths.data[i],0xf8);
+  if(vertices.size<0||vertices.size>2000000)throw std::runtime_error("Invalid vertex list.");
+  const auto* data=reinterpret_cast<const byte*>(vertices.data);
+  for(int64_t j=0;j<vertices.size;j++) {
+   const auto* xy=reinterpret_cast<const float*>(data+28*j);
+   const double y=s.flip?s.maxy-xy[1]:xy[1]-s.miny;
+   const double x=dtw::warpedX(xy[0],cx,y,p,s.single);
+   if(!std::isfinite(x)||std::abs(x)>1e7)throw std::runtime_error("Geometry is out of range.");
+   minX=std::min(minX,x);maxX=std::max(maxX,x);
+  }
+ }
+ const dtw::Point warpedCenter=position&&position->geometryReference
+  ?dtw::referenceAnchor(cx,s.flip?s.maxy:s.miny,p,s.flip)
+  :dtw::Point{(minX+maxX)/2,(s.miny+s.maxy)/2};
+ if(position) {
+  // Opposite corners still bound both axes after a quarter turn.
+  if(!dtw::validPosition(dtw::placePoint({minX,s.miny},warpedCenter,*position,s.flip))||
+     !dtw::validPosition(dtw::placePoint({maxX,s.maxy},warpedCenter,*position,s.flip)))
+   throw std::runtime_error("The placed design is out of range.");
+ }
  for(int64_t i=0;i<s.paths.size;i++) {
   auto path=s.paths.data[i];
   auto& vertices=at<List>(path,0xf8);
-  if(vertices.size<0||vertices.size>2000000) throw std::runtime_error("Invalid vertex list.");
   byte* verts=reinterpret_cast<byte*>(vertices.data);
   for(int64_t j=0;j<vertices.size;j++) {
    float* xy=reinterpret_cast<float*>(verts+28*j);
    double y=s.flip?s.maxy-xy[1]:xy[1]-s.miny;
-   double x=cx+(xy[0]-cx)*dtw::compensation(y+p.offset,p,s.single);
-   if(!std::isfinite(x)||std::abs(x)>1e7) throw std::runtime_error("Geometry is out of range.");
-   xy[0]=static_cast<float>(x); // All primitives were flattened to lines.
+   dtw::Point result{dtw::warpedX(xy[0],cx,y,p,s.single),xy[1]};
+   if(position)result=dtw::placePoint(result,warpedCenter,*position,s.flip);
+   xy[0]=static_cast<float>(result.x);
+   xy[1]=static_cast<float>(result.y);
   }
   fn<void(*)(void*)>(profile->computeBounds)(path);
  }
