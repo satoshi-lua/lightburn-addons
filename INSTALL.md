@@ -10,8 +10,6 @@
 | 2.1.04 | `68a80dabab4b05c3773a231d3aaaa0adf64df61b4bee2aeced6fa369b0ef149b` |
 | 2.2.01 | `1c7c1d2d0843535bcd3188b569ca2b1ace5c1281eb0324de9aa881ebb65b4b3b` |
 
-Manual verification of 2.2.01 is pending.
-
 To specify a different LightBurn location, open Command Prompt in the extracted folder and run the launcher with the full path.
 
 ```bat
