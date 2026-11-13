@@ -39,7 +39,7 @@ inline std::string previewSvg(const Parameters& p,bool single,double designWidth
   }
  };
  out<<"<svg xmlns='http://www.w3.org/2000/svg' width='"<<width<<"' height='"<<height<<"' viewBox='0 0 "<<width<<" "<<height<<"'>";
- out<<"<rect width='100%' height='100%' fill='"<<theme.background<<"'/><g font-family='sans-serif' font-size='11'>";
+ out<<"<rect width='"<<width<<"' height='"<<height<<"' fill='"<<theme.background<<"'/><g font-family='sans-serif' font-size='11'>";
  const double edges[]={0,single?0:p.upper,single?p.height:p.height-p.lower,p.height};
  if(zones) {
   const char* colors[]={"#4d9de0","#e3af36","#5da65d"};

@@ -7,6 +7,7 @@ int main() {
  auto original=dtw::previewSvg(p,true,40,paths,700,540,true,true,false,1,"mm",{});
  auto warped=dtw::previewSvg(p,true,40,paths,700,540,false,true,false,1,"mm",{});
  assert(original!=warped);
+ assert(warped.find("<rect width='700' height='540' fill='#ffffff'/>")!=std::string::npos);
  assert(warped.find("87 mm")!=std::string::npos&&warped.find("73 mm")!=std::string::npos);
  assert(warped.find("Tramo cónico")!=std::string::npos);
  auto inch=dtw::previewSvg(p,true,40,paths,700,540,false,true,true,1/25.4,"in",{});
